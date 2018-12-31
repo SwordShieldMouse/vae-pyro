@@ -4,8 +4,11 @@ import os
 import numpy as np
 import pyro.distributions as dist
 import torch.nn as nn
+import torchvision
+import pyro.optim
 
 pyro.enable_validation(True)
+pyro.distributions.enable_validation(False)
 
 class Decoder(nn.Module):
     # the posterior distribution of x given z
@@ -21,11 +24,11 @@ class Decoder(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, z):
-        hidden = self.softplus(self.fc1(z))
+        hidden = self.leaky_relu(self.fc1(z))
         output = self.sigmoid(self.fc2(hidden)) # sigmoid since pixel values are in [0, 1]
         return output
 
-def Encoder(nn.Module):
+class Encoder(nn.Module):
     # the posterior dist of z given x
     # takes in an input x and outputs parameters for a code z
     def __init__(self, z_dim, hidden_dim):
@@ -47,8 +50,9 @@ def Encoder(nn.Module):
         return z_loc, z_scale
 
 
-def VAE(nn.Module):
+class VAE(nn.Module):
     def __init__(self, z_dim = 50, hidden_dim = 400):
+        super(VAE, self).__init__()
         self.encoder = Encoder(z_dim, hidden_dim)
         self.decoder = Decoder(z_dim, hidden_dim)
 
@@ -62,17 +66,17 @@ def VAE(nn.Module):
         with pyro.plate("data", x.shape[0]):
             # hyperparameters for prior p(z)
             z_loc = x.new_zeros([x.shape[0], self.z_dim])
-            z_scale = x.new_zeros([x.shape[0], self.z_dim])
+            z_scale = x.new_ones([x.shape[0], self.z_dim])
             z = pyro.sample("latent", dist.Normal(z_loc, z_scale).to_event(1)) # dependent within rows
 
             # decode the latent z
-            decoded = self.decoder(z)
+            decoded = self.decoder(z) # why call forward explicitly instead of just __call__?
 
             # score against real images
             pyro.sample("obs", dist.Bernoulli(decoded).to_event(1), obs = x.reshape(-1, 784)) # dependent within rows
 
     # the variational distribution q(z|x)
-    def guide(self., x):
+    def guide(self, x):
         pyro.module("encoder", self.encoder)
         with pyro.plate("data", x.shape[0]):
             z_loc, z_scale = self.encoder(x)
